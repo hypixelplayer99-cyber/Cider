@@ -53,10 +53,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      # Uses -w (Windows) instead of -l (Linux)
+      # NEW STEP: Automatically patches the file right after installation!
+      - name: Force C++20 in node-airtunes2
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'node_modules/node-airtunes2/binding.gyp';
+            if (fs.existsSync(path)) {
+              let content = fs.readFileSync(path, 'utf8');
+              // Injects the C++20 requirement for Windows right before the sources array
+              content = content.replace(
+                /"sources":\s*\[/, 
+                '"conditions": [["OS==\'win\'", {"msvs_settings": {"VCCLCompilerTool": {"AdditionalOptions": ["/std:c++20"]}}}]],\n      "sources": ['
+              );
+              fs.writeFileSync(path, content);
+              console.log('Successfully patched binding.gyp');
+            } else {
+              console.log('binding.gyp not found! The build might fail.');
+            }
+
       - name: Build Windows Software
-        env:
-          CL: /std:c++20
         run: pnpm dist -w --x64
 
       - name: Upload Windows dist
@@ -85,7 +102,6 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          # Using wildcards so you don't have to manually update the version number in the YAML
           files: |
             ./dist-linux/*.deb
             ./dist-linux/*.AppImage
