@@ -53,34 +53,46 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      # NEW STEP: Improved flexible patching logic with a built-in fail-safe
+      # NEW STEP: Brute-force overwrite the binding.gyp file
       - name: Force C++20 in node-airtunes2
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const path = 'node_modules/node-airtunes2/binding.gyp';
-            if (fs.existsSync(path)) {
-              let content = fs.readFileSync(path, 'utf8');
-              
-              // Flexible regex to catch single/double quotes and varying spacing
-              const regex = /(['"]sources['"]\s*:)/;
-              
-              if (regex.test(content)) {
-                content = content.replace(
-                  regex, 
-                  '"conditions": [["OS==\'win\'", {"msvs_settings": {"VCCLCompilerTool": {"AdditionalOptions": ["/std:c++20"]}}}]],\n      $1'
-                );
-                fs.writeFileSync(path, content);
-                console.log('Successfully patched binding.gyp!');
-              } else {
-                console.error('Regex failed: Could not find the "sources" array in binding.gyp!');
-                process.exit(1); // Force fail the action instantly
-              }
-            } else {
-              console.error('File not found: binding.gyp is missing entirely!');
-              process.exit(1); // Force fail the action instantly
+            
+            let gypPath;
+            try {
+              // fs.realpathSync bypasses pnpm's virtual symlinks to find the physical file
+              gypPath = fs.realpathSync('node_modules/node-airtunes2/binding.gyp');
+            } catch (err) {
+              console.error("CRITICAL ERROR: Could not find binding.gyp! The package didn't install correctly.");
+              process.exit(1);
             }
+
+            // We completely overwrite the file rather than trying to parse/edit it
+            const gypContent = `{
+              "targets": [
+                {
+                  "target_name": "airtunes",
+                  "sources": [
+                    "src/airtunes.cc",
+                    "src/codec.cc"
+                  ],
+                  "include_dirs": [
+                    "<!(node -e \\"require('nan')\\")"
+                  ],
+                  "cflags_cc": ["-std=c++20"],
+                  "msvs_settings": {
+                    "VCCLCompilerTool": {
+                      "AdditionalOptions": ["/std:c++20"]
+                    }
+                  }
+                }
+              ]
+            }`;
+
+            fs.writeFileSync(gypPath, gypContent);
+            console.log("SUCCESS: Brute-forced binding.gyp at " + gypPath);
 
       - name: Build Windows Software
         run: pnpm dist -w --x64
